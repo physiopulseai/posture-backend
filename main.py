@@ -29,17 +29,16 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 @app.post("/process-image/")
 async def process_image(file: UploadFile = File(...)):
     try:
-        # 🔹 Generate unique filename
         contents = await file.read()
         filename = f"{uuid.uuid4()}.jpg"
+        print(f"Uploading file: {filename}")
 
-        # 🔹 Upload to Supabase Storage
-        supabase.storage.from_('images').upload(filename, contents, {"content-type": "image/jpeg"})
+        res = supabase.storage.from_('images').upload(filename, contents, {"content-type": "image/jpeg"})
+        print(f"Upload response: {res}")
 
-        # 🔹 Get public image URL
         image_url = supabase.storage.from_('images').get_public_url(filename)
+        print(f"Image URL: {image_url}")
 
-        # 🔹 Dummy posture data (replace with real Mediapipe logic later)
         angle_data = {
             "Head Deviation": 11,
             "Shoulder": 78,
@@ -47,18 +46,16 @@ async def process_image(file: UploadFile = File(...)):
             "Hip": 121,
         }
 
-        # 🔹 Save metadata to Supabase table
-        response = supabase.table("posture_data").insert({
+        insert_response = supabase.table("posture_data").insert({
             "image_url": image_url,
             "angle_data": angle_data,
             "timestamp": datetime.utcnow().isoformat()
         }).execute()
+        print(f"Insert response: {insert_response}")
 
-        return JSONResponse(content={
-            "image_url": image_url,
-            "angle_data": angle_data,
-            "db_response": response.data
-        })
+        return {"image_url": image_url, "angle_data": angle_data}
 
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        import traceback
+        traceback.print_exc()  # Ye exact traceback console/logs me print karega
+        return JSONResponse(content={"error": str(e)}, status_code=500)
