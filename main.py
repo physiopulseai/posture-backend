@@ -1,69 +1,62 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import cv2
-import numpy as np
-import uuid
 from supabase import create_client, Client
-import mediapipe as mp
-
-# --- Supabase Config ---
-SUPABASE_URL = "https://dehdirlguqpeecnuynqc.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlaGRpcmxndXFwZWVjbnV5bnFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI3MjYxNjMsImV4cCI6MjA1ODMwMjE2M30.7SovkQX9lDgkr4CruUFFnw6HTCe0MNw2eEghBptSlWs"
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# --- Mediapipe Setup ---
-mp_pose = mp.solutions.pose
-pose = mp_pose.Pose(static_image_mode=True)
-mp_drawing = mp.solutions.drawing_utils
+import uuid
+from datetime import datetime
 
 app = FastAPI()
 
-# --- CORS ---
+# ✅ CORS Configuration
+origins = [
+    "https://aicam.infinitenxt.com",  # tera frontend domain
+    "http://localhost:5500",          # optional local test
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Production me change kar lena
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-def process_image(img_bytes):
-    nparr = np.frombuffer(img_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+# ✅ Supabase Configuration
+SUPABASE_URL = "https://dehdirlguqpeecnuynqc.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlaGRpcmxndXFwZWVjbnV5bnFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI3MjYxNjMsImV4cCI6MjA1ODMwMjE2M30.7SovkQX9lDgkr4CruUFFnw6HTCe0MNw2eEghBptSlWs"
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    results = pose.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-
-    if results.pose_landmarks:
-        mp_drawing.draw_landmarks(img, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
-
-    _, processed_bytes = cv2.imencode(".png", img)
-
-    dummy_angles = {
-        "Head Deviation": 11,
-        "Shoulder": 78,
-        "Elbow": 176,
-        "Hip": 121
-    }
-
-    return processed_bytes.tobytes(), dummy_angles
-
-def upload_to_supabase(image_bytes):
-    file_name = f"posture_{uuid.uuid4()}.png"
-    supabase.storage.from_('images').upload(file_name, image_bytes)
-    url = f"{SUPABASE_URL}/storage/v1/object/public/images/{file_name}"
-    return url
-
+# ✅ Upload & Process Endpoint
 @app.post("/process-image/")
-async def process_image_api(file: UploadFile = File(...)):
-    image_bytes = await file.read()
-    processed_image, angles = process_image(image_bytes)
-    image_url = upload_to_supabase(processed_image)
+async def process_image(file: UploadFile = File(...)):
+    try:
+        # 🟢 Step 1: Unique filename
+        contents = await file.read()
+        filename = f"{uuid.uuid4()}.jpg"
 
-    supabase.table("posture_data").insert({
-        "image_url": image_url,
-        "angles": angles,
-        "type": "siting-right"
-    }).execute()
+        # 🟢 Step 2: Upload to Supabase Storage
+        supabase.storage.from_('images').upload(filename, contents, {"content-type": "image/jpeg"})
 
-    return JSONResponse(content={"image_url": image_url, "angles": angles})
+        # 🟢 Step 3: Get public URL
+        image_url = supabase.storage.from_('images').get_public_url(filename)
+
+        # 🟢 Step 4: Dummy angles (replace with real processing later)
+        angle_data = {
+            "Head Deviation": 11,
+            "Shoulder": 78,
+            "Elbow": 176,
+            "Hip": 121,
+        }
+
+        # 🟢 Step 5: Insert data into Supabase table
+        supabase.table("posture_data").insert({
+            "image_url": image_url,
+            "angle_data": angle_data,
+            "timestamp": datetime.utcnow().isoformat()
+        }).execute()
+
+        # ✅ Step 6: Return response
+        return JSONResponse(content={"image_url": image_url, "angle_data": angle_data})
+
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
