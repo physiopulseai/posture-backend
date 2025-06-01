@@ -7,10 +7,10 @@ from datetime import datetime
 
 app = FastAPI()
 
-# ✅ CORS Configuration
+# ✅ CORS config
 origins = [
-    "https://aicam.infinitenxt.com",  # tera frontend domain
-    "http://localhost:5500",          # optional local test
+    "https://aicam.infinitenxt.com",
+    "http://localhost:5500",
 ]
 
 app.add_middleware(
@@ -21,26 +21,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ Supabase Configuration
+# ✅ Supabase Config
 SUPABASE_URL = "https://dehdirlguqpeecnuynqc.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlaGRpcmxndXFwZWVjbnV5bnFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI3MjYxNjMsImV4cCI6MjA1ODMwMjE2M30.7SovkQX9lDgkr4CruUFFnw6HTCe0MNw2eEghBptSlWs"
+SUPABASE_KEY = "your_anon_key_here"  # for safety, don't commit real key
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ✅ Upload & Process Endpoint
 @app.post("/process-image/")
 async def process_image(file: UploadFile = File(...)):
     try:
-        # 🟢 Step 1: Unique filename
+        # 🔹 Generate unique filename
         contents = await file.read()
         filename = f"{uuid.uuid4()}.jpg"
 
-        # 🟢 Step 2: Upload to Supabase Storage
+        # 🔹 Upload to Supabase Storage
         supabase.storage.from_('images').upload(filename, contents, {"content-type": "image/jpeg"})
 
-        # 🟢 Step 3: Get public URL
+        # 🔹 Get public image URL
         image_url = supabase.storage.from_('images').get_public_url(filename)
 
-        # 🟢 Step 4: Dummy angles (replace with real processing later)
+        # 🔹 Dummy posture data (replace with real Mediapipe logic later)
         angle_data = {
             "Head Deviation": 11,
             "Shoulder": 78,
@@ -48,15 +47,18 @@ async def process_image(file: UploadFile = File(...)):
             "Hip": 121,
         }
 
-        # 🟢 Step 5: Insert data into Supabase table
-        supabase.table("posture_data").insert({
+        # 🔹 Save metadata to Supabase table
+        response = supabase.table("posture_data").insert({
             "image_url": image_url,
             "angle_data": angle_data,
             "timestamp": datetime.utcnow().isoformat()
         }).execute()
 
-        # ✅ Step 6: Return response
-        return JSONResponse(content={"image_url": image_url, "angle_data": angle_data})
+        return JSONResponse(content={
+            "image_url": image_url,
+            "angle_data": angle_data,
+            "db_response": response.data
+        })
 
     except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return JSONResponse(status_code=500, content={"error": str(e)})
