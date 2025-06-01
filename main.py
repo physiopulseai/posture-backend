@@ -23,7 +23,7 @@ app.add_middleware(
 
 # Supabase
 SUPABASE_URL = "https://dehdirlguqpeecnuynqc.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlaGRpcmxndXFwZWVjbnV5bnFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI3MjYxNjMsImV4cCI6MjA1ODMwMjE2M30.7SovkQX9lDgkr4CruUFFnw6HTCe0MNw2eEghBptSlWs"
+SUPABASE_KEY = "your_supabase_key"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Mediapipe Setup
@@ -50,6 +50,10 @@ async def process_image(
 
             # Calculate angles
             angle_data = calculate_posture_angles(results.pose_landmarks.landmark, type, subtype)
+            angle_data = {k: v for k, v in angle_data.items() if v is not None}  # clean
+
+            if not angle_data:
+                return JSONResponse(content={"error": "Could not extract posture data"}, status_code=400)
 
             # Draw landmarks
             mp_drawing.draw_landmarks(image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
@@ -77,54 +81,57 @@ async def process_image(
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-# ⬇️ Angle calculation logic
+# ---------------------- Angle Logic ----------------------
 def calculate_posture_angles(landmarks, type, subtype):
-    # Dummy logic: replace with real angle calculation per posture
-    # type: 'head' or 'body'
-    # subtype: 'LateralLeft', etc.
-
+    import math
     def get_angle(a, b, c):
-        import math
         ang = math.degrees(
             math.atan2(c.y - b.y, c.x - b.x) -
             math.atan2(a.y - b.y, a.x - b.x)
         )
         return abs(ang) if ang >= 0 else 360 + ang
 
+    def safe_get_angle(lms, a, b, c):
+        try:
+            if lms[a].visibility < 0.5 or lms[b].visibility < 0.5 or lms[c].visibility < 0.5:
+                return None
+            return get_angle(lms[a], lms[b], lms[c])
+        except:
+            return None
+
     if type == "body" and subtype == "Anterior":
         return {
-            "Body Alignment": get_angle(landmarks[11], landmarks[23], landmarks[25]),
-            "Head Shift": get_angle(landmarks[0], landmarks[11], landmarks[12]),
-            "Acromion": get_angle(landmarks[11], landmarks[13], landmarks[15]),
-            "Axillary": get_angle(landmarks[12], landmarks[14], landmarks[16]),
-            "Ribcage": get_angle(landmarks[11], landmarks[23], landmarks[24]),
-            "ASIS": get_angle(landmarks[23], landmarks[25], landmarks[27]),
-            "Knee": get_angle(landmarks[25], landmarks[27], landmarks[29]),
-            "Feet": get_angle(landmarks[27], landmarks[29], landmarks[31])
+            "Body Alignment": safe_get_angle(landmarks, 11, 23, 25),
+            "Head Shift": safe_get_angle(landmarks, 0, 11, 12),
+            "Acromion": safe_get_angle(landmarks, 11, 13, 15),
+            "Axillary": safe_get_angle(landmarks, 12, 14, 16),
+            "Ribcage": safe_get_angle(landmarks, 11, 23, 24),
+            "ASIS": safe_get_angle(landmarks, 23, 25, 27),
+            "Knee": safe_get_angle(landmarks, 25, 27, 29),
+            "Feet": safe_get_angle(landmarks, 27, 29, 31)
         }
 
     elif type == "body" and "Lateral" in subtype:
         return {
-            "Body Alignment": get_angle(landmarks[11], landmarks[23], landmarks[25]),
-            "Head Deviation": get_angle(landmarks[0], landmarks[11], landmarks[23]),
-            "Shoulder": get_angle(landmarks[11], landmarks[13], landmarks[15]),
-            "Knee": get_angle(landmarks[25], landmarks[27], landmarks[29])
+            "Body Alignment": safe_get_angle(landmarks, 11, 23, 25),
+            "Head Deviation": safe_get_angle(landmarks, 0, 11, 23),
+            "Shoulder": safe_get_angle(landmarks, 11, 13, 15),
+            "Knee": safe_get_angle(landmarks, 25, 27, 29)
         }
 
     elif type == "body" and "Sitting" in subtype:
         return {
-            "Head Deviation": get_angle(landmarks[0], landmarks[11], landmarks[23]),
-            "Shoulder": get_angle(landmarks[11], landmarks[13], landmarks[15]),
-            "Elbow": get_angle(landmarks[13], landmarks[15], landmarks[19]),
-            "Hip": get_angle(landmarks[23], landmarks[25], landmarks[27])
+            "Head Deviation": safe_get_angle(landmarks, 0, 11, 23),
+            "Shoulder": safe_get_angle(landmarks, 11, 13, 15),
+            "Elbow": safe_get_angle(landmarks, 13, 15, 19),
+            "Hip": safe_get_angle(landmarks, 23, 25, 27)
         }
 
     elif type == "head":
         return {
-            "CHS": get_angle(landmarks[0], landmarks[11], landmarks[12]),
-            "Neck angle": get_angle(landmarks[11], landmarks[23], landmarks[25]),
-            "Shoulder angle": get_angle(landmarks[11], landmarks[13], landmarks[15])
+            "CHS": safe_get_angle(landmarks, 0, 11, 12),
+            "Neck angle": safe_get_angle(landmarks, 11, 23, 25),
+            "Shoulder angle": safe_get_angle(landmarks, 11, 13, 15)
         }
 
-    return {"error": "No valid posture detected"}
-
+    return {}
