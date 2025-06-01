@@ -23,7 +23,7 @@ app.add_middleware(
 
 # ✅ Supabase Config
 SUPABASE_URL = "https://dehdirlguqpeecnuynqc.supabase.co"
-SUPABASE_KEY = "your_anon_key_here"  # for safety, don't commit real key
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlaGRpcmxndXFwZWVjbnV5bnFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI3MjYxNjMsImV4cCI6MjA1ODMwMjE2M30.7SovkQX9lDgkr4CruUFFnw6HTCe0MNw2eEghBptSlWs"  # for safety, don't commit real key
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 @app.post("/process-image/")
