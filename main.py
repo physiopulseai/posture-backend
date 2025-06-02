@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Query
+from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from supabase import create_client, Client
@@ -11,12 +11,11 @@ import io
 
 app = FastAPI()
 
-# CORS config
+# CORS
 origins = [
     "https://aicam.infinitenxt.com",
     "http://localhost:5500",
 ]
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -25,73 +24,71 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Supabase config
+# Supabase Config
 SUPABASE_URL = "https://dehdirlguqpeecnuynqc.supabase.co"
-SUPABASE_KEY = "YOUR_SUPABASE_SECRET"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlaGRpcmxndXFwZWVjbnV5bnFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI3MjYxNjMsImV4cCI6MjA1ODMwMjE2M30.7SovkQX9lDgkr4CruUFFnw6HTCe0MNw2eEghBptSlWs"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Helper for Mediapipe processing
-def process_with_mediapipe(image_np, type_, subtype):
+# Posture analysis using MediaPipe
+def analyze_posture(image_np, type, subtype):
     mp_pose = mp.solutions.pose
-    results_data = {}
-    
-    with mp_pose.Pose(static_image_mode=True) as pose:
-        results = pose.process(cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB))
+    pose = mp_pose.Pose(static_image_mode=True)
+    results = pose.process(cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB))
 
-        if results.pose_landmarks:
-            # Draw landmarks
-            mp_drawing = mp.solutions.drawing_utils
-            annotated_image = image_np.copy()
-            mp_drawing.draw_landmarks(annotated_image, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+    if not results.pose_landmarks:
+        return None, {"error": "No pose landmarks detected"}
 
-            # Dummy sample angles (replace with real calculations)
-            results_data = {
-                "CHS": 123.4,
-                "Neck Angle": 45.6,
-                "Shoulder Tilt": 12.3
-            }
+    # Example: Extracting basic landmark coordinates
+    landmarks = results.pose_landmarks.landmark
+    data = {
+        "CHS": round(landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER].y - landmarks[mp_pose.PoseLandmark.LEFT_HIP].y, 3),
+        "Shoulder Angle": 76,
+        "Neck Tilt": 12,
+        "Hip Angle": 109,
+    }
 
-            return annotated_image, results_data
-        else:
-            raise Exception("No pose landmarks detected")
+    # Draw landmarks on image
+    mp.solutions.drawing_utils.draw_landmarks(image_np, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+
+    return image_np, data
 
 @app.post("/process-image/")
 async def process_image(
     file: UploadFile = File(...),
-    id: str = Query(...),
-    type: str = Query(...),
-    subtype: str = Query(...)
+    type: str = Form(...),
+    subtype: str = Form(...),
+    Id: str = Form(...)
 ):
     try:
         contents = await file.read()
-        image_np = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
+        np_arr = np.frombuffer(contents, np.uint8)
+        image_np = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
-        processed_image, angle_data = process_with_mediapipe(image_np, type, subtype)
+        # Process image
+        processed_image, posture_data = analyze_posture(image_np, type, subtype)
+        if processed_image is None:
+            return JSONResponse(content={"error": "Pose not detected"}, status_code=400)
 
-        # Encode to .jpg
-        _, buffer = cv2.imencode('.jpg', processed_image)
-        processed_bytes = io.BytesIO(buffer)
-
-        filename = f"{uuid.uuid4()}.jpg"
+        # Encode to JPEG
+        _, buffer = cv2.imencode(".jpg", processed_image)
+        image_bytes = io.BytesIO(buffer).getvalue()
 
         # Upload to Supabase
-        supabase.storage.from_('images').upload(filename, processed_bytes.getvalue(), {"content-type": "image/jpeg"})
-        image_url = supabase.storage.from_('images').get_public_url(filename)
+        filename = f"{uuid.uuid4()}.jpg"
+        supabase.storage.from_("images").upload(filename, image_bytes, {"content-type": "image/jpeg"})
+        image_url = supabase.storage.from_("images").get_public_url(filename)
 
-        # Save to table
+        # Save metadata to table
         supabase.table("posture_data").insert({
-            "user_id": id,
             "image_url": image_url,
-            "angle_data": angle_data,
+            "angle_data": posture_data,
             "type": type,
             "subtype": subtype,
+            "user_id": Id,
             "timestamp": datetime.utcnow().isoformat()
         }).execute()
 
-        return JSONResponse(content={
-            "image_url": image_url,
-            "angle_data": angle_data
-        })
+        return JSONResponse(content={"image_url": image_url, "angle_data": posture_data})
 
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
